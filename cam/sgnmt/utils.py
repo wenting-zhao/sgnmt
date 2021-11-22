@@ -23,7 +23,7 @@ quirks Python sometimes has.
 from abc import abstractmethod
 import numpy
 import operator
-from scipy.misc import logsumexp
+from scipy.special import logsumexp
 from subprocess import call
 from shutil import copyfile
 import logging

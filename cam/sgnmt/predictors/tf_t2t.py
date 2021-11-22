@@ -72,7 +72,7 @@ try:
             return self._vocab_size
 
     # Define flags from the t2t binaries
-    flags = tf.flags
+    flags = tf.compat.v1.flags
     FLAGS = flags.FLAGS
     flags.DEFINE_string("schedule", "train_and_evaluate",
                         "Method of tf.contrib.learn.Experiment to run.")

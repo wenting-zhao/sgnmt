@@ -101,22 +101,27 @@ class FairseqPredictor(Predictor):
                 model.cuda()
         self.model = EnsembleModel(self.models)
         self.model.eval()
+        self.incremental_states = [{}]*len(self.models)
 
     def get_unk_probability(self, posterior):
         """Fetch posterior[utils.UNK_ID]"""
         return utils.common_get(posterior, utils.UNK_ID, utils.NEG_INF)
                 
+    @torch.no_grad()  
     def predict_next(self):
         """Call the fairseq model."""
-        lprobs, _ = self.model.forward_decoder(
-            torch.LongTensor([self.consumed]), self.encoder_outs
-        )
-        lprobs[0, self.pad_id] = utils.NEG_INF
-        return np.array(lprobs[0])
+        inputs = torch.LongTensor([self.consumed])
+        
+        if self.use_cuda:
+            inputs = inputs.cuda()
+        lprobs, _  = self.model.forward_decoder(
+            inputs, self.encoder_outs, self.incremental_states)
+        lprobs[:, self.pad_id] = utils.NEG_INF
+        return np.array(lprobs[0].cpu() if self.use_cuda else lprobs[0], dtype=np.float64)
     
+    @torch.no_grad()  
     def initialize(self, src_sentence):
         """Initialize source tensors, reset consumed."""
-        self.consumed = []
         src_tokens = torch.LongTensor([
             utils.oov_to_unk(src_sentence + [utils.EOS_ID],
                              self.src_vocab_size)])
@@ -128,24 +133,40 @@ class FairseqPredictor(Predictor):
             'src_tokens': src_tokens,
             'src_lengths': src_lengths})
         self.consumed = [utils.GO_ID or utils.EOS_ID]
+
         # Reset incremental states
-        for model in self.models:
-            self.model.incremental_states[model] = {}
+        self.reset_states()
+
+    def reset_states(self, states=None):
+         # Reset incremental states
+        for i in range(len(self.models)):
+            self.incremental_states[i] = {}
    
-    def consume(self, word):
+    def consume(self, word, i=None):
         """Append ``word`` to the current history."""
-        self.consumed.append(word)
+        self.consumed.append(word) if i is None else self.consumed[i].append(word)
+
+    def get_empty_str_prob(self):
+        return self.get_initial_dist()[utils.EOS_ID].item()
+
+    @torch.no_grad()   
+    def get_initial_dist(self):
+        inputs = torch.LongTensor([[utils.GO_ID or utils.EOS_ID]])
+        if self.use_cuda:
+            inputs = inputs.cuda()
+        
+        lprobs, _ = self.model.forward_decoder(
+            inputs, self.encoder_outs, [{}]*len(self.models)
+        )
+        return np.array(lprobs[0].cpu() if self.use_cuda else lprobs[0], dtype=np.float64)
     
     def get_state(self):
         """The predictor state is the complete history."""
-        return self.consumed, [self.model.incremental_states[m] 
-                               for m in self.models]
+        return self.consumed, self.incremental_states
     
     def set_state(self, state):
         """The predictor state is the complete history."""
-        self.consumed, inc_states = state
-        for model, inc_state in zip(self.models, inc_states):
-            self.model.incremental_states[model] = inc_state
+        self.consumed, self.incremental_states = state
 
     def is_equal(self, state1, state2):
         """Returns true if the history is the same """

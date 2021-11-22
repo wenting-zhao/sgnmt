@@ -25,7 +25,7 @@ using a language model.
 
 import logging
 import math
-from scipy.misc import logsumexp
+from scipy.special import logsumexp
 from scipy.special import gammaln
 
 from cam.sgnmt import utils
